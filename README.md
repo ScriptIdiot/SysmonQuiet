@@ -2,6 +2,8 @@
 
 Most of the codes come from SEKTOR7 - Windows Evasion Course. This RDLL (requires *SeDebugPrivilege* privilege) will automatically locate sysmon process and patch its EtwEventWrite API, causing sysmon malfunctioning while the process and its threads are still running.
 
+*The effect lasts until next reboot / service restart*
+
 
 ## Usage - Cobalt Strike
 Load SysmonQuiet.cna
