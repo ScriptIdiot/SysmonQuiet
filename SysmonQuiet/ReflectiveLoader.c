@@ -1,28 +1,28 @@
 //===============================================================================================//
-// Copyright (c) 2012, Stephen Fewer of Harmony Security (www.harmonysecurity.com)
+// Copyright (c) 2013, Stephen Fewer of Harmony Security (www.harmonysecurity.com)
 // All rights reserved.
-// 
-// Redistribution and use in source and binary forms, with or without modification, are permitted 
+//
+// Redistribution and use in source and binary forms, with or without modification, are permitted
 // provided that the following conditions are met:
-// 
-//     * Redistributions of source code must retain the above copyright notice, this list of 
+//
+//     * Redistributions of source code must retain the above copyright notice, this list of
 // conditions and the following disclaimer.
-// 
-//     * Redistributions in binary form must reproduce the above copyright notice, this list of 
-// conditions and the following disclaimer in the documentation and/or other materials provided 
+//
+//     * Redistributions in binary form must reproduce the above copyright notice, this list of
+// conditions and the following disclaimer in the documentation and/or other materials provided
 // with the distribution.
-// 
+//
 //     * Neither the name of Harmony Security nor the names of its contributors may be used to
 // endorse or promote products derived from this software without specific prior written permission.
-// 
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR 
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
 // IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
-// FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR 
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
-// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR 
-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY 
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR 
-// OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
+// FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+// OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //===============================================================================================//
 #include "ReflectiveLoader.h"
@@ -30,32 +30,47 @@
 // Our loader will set this to a pseudo correct HINSTANCE/HMODULE value
 HINSTANCE hAppInstance = NULL;
 //===============================================================================================//
-#pragma intrinsic( _ReturnAddress )
-// This function can not be inlined by the compiler or we will not get the address we expect. Ideally 
-// this code will be compiled with the /O2 and /Ob1 switches. Bonus points if we could take advantage of 
-// RIP relative addressing in this instance but I dont believe we can do so with the compiler intrinsics 
+#ifdef __MINGW32__
+#define WIN_GET_CALLER() __builtin_extract_return_addr(__builtin_return_address(0))
+#else
+#pragma intrinsic(_ReturnAddress)
+#define WIN_GET_CALLER() _ReturnAddress()
+#endif
+// This function can not be inlined by the compiler or we will not get the address we expect. Ideally
+// this code will be compiled with the /O2 and /Ob1 switches. Bonus points if we could take advantage of
+// RIP relative addressing in this instance but I dont believe we can do so with the compiler intrinsics
 // available (and no inline asm available under x64).
-__declspec(noinline) ULONG_PTR caller(VOID) { return (ULONG_PTR)_ReturnAddress(); }
+__declspec(noinline) ULONG_PTR caller(VOID) { return (ULONG_PTR)WIN_GET_CALLER(); }
 //===============================================================================================//
 
-// Note 1: If you want to have your own DllMain, define REFLECTIVEDLLINJECTION_CUSTOM_DLLMAIN,  
+// Note 1: If you want to have your own DllMain, define REFLECTIVEDLLINJECTION_CUSTOM_DLLMAIN,
 //         otherwise the DllMain at the end of this file will be used.
 
 // Note 2: If you are injecting the DLL via LoadRemoteLibraryR, define REFLECTIVEDLLINJECTION_VIA_LOADREMOTELIBRARYR,
 //         otherwise it is assumed you are calling the ReflectiveLoader via a stub.
 
+#ifdef RDIDLL_NOEXPORT
+#define RDIDLLEXPORT
+#else
+#define RDIDLLEXPORT DLLEXPORT
+#endif
+
 // This is our position independent reflective DLL loader/injector
 #ifdef REFLECTIVEDLLINJECTION_VIA_LOADREMOTELIBRARYR
-DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(LPVOID lpParameter)
+RDIDLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(LPVOID lpParameter)
 #else
-DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
+RDIDLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 #endif
 {
 	// the functions we need
 	LOADLIBRARYA pLoadLibraryA = NULL;
 	GETPROCADDRESS pGetProcAddress = NULL;
 	VIRTUALALLOC pVirtualAlloc = NULL;
+	VIRTUALPROTECT pVirtualProtect = NULL;
 	NTFLUSHINSTRUCTIONCACHE pNtFlushInstructionCache = NULL;
+#ifdef ENABLE_STOPPAGING
+	VIRTUALLOCK pVirtualLock = NULL;
+#endif
 
 	USHORT usCounter;
 
@@ -78,6 +93,7 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 	ULONG_PTR uiValueC;
 	ULONG_PTR uiValueD;
 	ULONG_PTR uiValueE;
+	DWORD dwProtect;
 
 	// STEP 0: calculate our images current base address
 
@@ -107,13 +123,13 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 	// STEP 1: process the kernels exports for the functions our loader needs...
 
 	// get the Process Enviroment Block
-#ifdef WIN_X64
+#ifdef _WIN64
 	uiBaseAddress = __readgsqword(0x60);
 #else
-#ifdef WIN_X86
-	uiBaseAddress = __readfsdword(0x30);
-#else WIN_ARM
+#ifdef WIN_ARM
 	uiBaseAddress = *(DWORD*)((BYTE*)_MoveFromCoprocessor(15, 0, 13, 0, 2) + 0x30);
+#else // _WIN32
+	uiBaseAddress = __readfsdword(0x30);
 #endif
 #endif
 
@@ -132,16 +148,18 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 		uiValueC = 0;
 
 		// compute the hash of the module name...
+		ULONG_PTR tmpValC = uiValueC;
 		do
 		{
-			uiValueC = ror((DWORD)uiValueC);
-			// normalize to uppercase if the madule name is in lowercase
+			tmpValC = ror((DWORD)tmpValC);
+			// normalize to uppercase if the module name is in lowercase
 			if (*((BYTE*)uiValueB) >= 'a')
-				uiValueC += *((BYTE*)uiValueB) - 0x20;
+				tmpValC += *((BYTE*)uiValueB) - 0x20;
 			else
-				uiValueC += *((BYTE*)uiValueB);
+				tmpValC += *((BYTE*)uiValueB);
 			uiValueB++;
 		} while (--usCounter);
+		uiValueC = tmpValC;
 
 		// compare the hash with that of kernel32.dll
 		if ((DWORD)uiValueC == KERNEL32DLL_HASH)
@@ -164,16 +182,26 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 			// get the VA for the array of name ordinals
 			uiNameOrdinals = (uiBaseAddress + ((PIMAGE_EXPORT_DIRECTORY)uiExportDir)->AddressOfNameOrdinals);
 
-			usCounter = 3;
+			usCounter = 4;
+#ifdef ENABLE_STOPPAGING
+			usCounter++;
+#endif
 
 			// loop while we still have imports to find
 			while (usCounter > 0)
 			{
 				// compute the hash values for this function name
-				dwHashValue = hash((char*)(uiBaseAddress + DEREF_32(uiNameArray)));
+				dwHashValue = _hash((char*)(uiBaseAddress + DEREF_32(uiNameArray)));
 
 				// if we have found a function we want we get its virtual address
-				if (dwHashValue == LOADLIBRARYA_HASH || dwHashValue == GETPROCADDRESS_HASH || dwHashValue == VIRTUALALLOC_HASH)
+				if (dwHashValue == LOADLIBRARYA_HASH
+					|| dwHashValue == GETPROCADDRESS_HASH
+					|| dwHashValue == VIRTUALALLOC_HASH
+					|| dwHashValue == VIRTUALPROTECT_HASH
+#ifdef ENABLE_STOPPAGING
+					|| dwHashValue == VIRTUALLOCK_HASH
+#endif
+					)
 				{
 					// get the VA for the array of addresses
 					uiAddressArray = (uiBaseAddress + ((PIMAGE_EXPORT_DIRECTORY)uiExportDir)->AddressOfFunctions);
@@ -188,6 +216,12 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 						pGetProcAddress = (GETPROCADDRESS)(uiBaseAddress + DEREF_32(uiAddressArray));
 					else if (dwHashValue == VIRTUALALLOC_HASH)
 						pVirtualAlloc = (VIRTUALALLOC)(uiBaseAddress + DEREF_32(uiAddressArray));
+					else if (dwHashValue == VIRTUALPROTECT_HASH)
+						pVirtualProtect = (VIRTUALPROTECT)(uiBaseAddress + DEREF_32(uiAddressArray));
+#ifdef ENABLE_STOPPAGING
+					else if (dwHashValue == VIRTUALLOCK_HASH)
+						pVirtualLock = (VIRTUALLOCK)(uiBaseAddress + DEREF_32(uiAddressArray));
+#endif
 
 					// decrement our counter
 					usCounter--;
@@ -226,7 +260,7 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 			while (usCounter > 0)
 			{
 				// compute the hash values for this function name
-				dwHashValue = hash((char*)(uiBaseAddress + DEREF_32(uiNameArray)));
+				dwHashValue = _hash((char*)(uiBaseAddress + DEREF_32(uiNameArray)));
 
 				// if we have found a function we want we get its virtual address
 				if (dwHashValue == NTFLUSHINSTRUCTIONCACHE_HASH)
@@ -254,7 +288,14 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 		}
 
 		// we stop searching when we have found everything we need.
-		if (pLoadLibraryA && pGetProcAddress && pVirtualAlloc && pNtFlushInstructionCache)
+		if (pLoadLibraryA
+			&& pGetProcAddress
+			&& pVirtualAlloc
+#ifdef ENABLE_STOPPAGING
+			&& pVirtualLock
+#endif
+			&& pNtFlushInstructionCache
+			)
 			break;
 
 		// get the next entry
@@ -266,9 +307,14 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 	// get the VA of the NT Header for the PE to be loaded
 	uiHeaderValue = uiLibraryAddress + ((PIMAGE_DOS_HEADER)uiLibraryAddress)->e_lfanew;
 
-	// allocate all the memory for the DLL to be loaded into. we can load at any address because we will  
-	// relocate the image. Also zeros all memory and marks it as READ, WRITE and EXECUTE to avoid any problems.
-	uiBaseAddress = (ULONG_PTR)pVirtualAlloc(NULL, ((PIMAGE_NT_HEADERS)uiHeaderValue)->OptionalHeader.SizeOfImage, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+	// allocate all the memory for the DLL to be loaded into. we can load at any address because we will
+	// relocate the image. Also zeros all memory and marks it as READ and WRITE to avoid any problems.
+	uiBaseAddress = (ULONG_PTR)pVirtualAlloc(NULL, ((PIMAGE_NT_HEADERS)uiHeaderValue)->OptionalHeader.SizeOfImage, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+
+#ifdef ENABLE_STOPPAGING
+	// prevent our image from being swapped to the pagefile
+	pVirtualLock((LPVOID)uiBaseAddress, ((PIMAGE_NT_HEADERS)uiHeaderValue)->OptionalHeader.SizeOfImage);
+#endif
 
 	// we must now copy over the headers
 	uiValueA = ((PIMAGE_NT_HEADERS)uiHeaderValue)->OptionalHeader.SizeOfHeaders;
@@ -283,7 +329,7 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 	// uiValueA = the VA of the first section
 	uiValueA = ((ULONG_PTR) & ((PIMAGE_NT_HEADERS)uiHeaderValue)->OptionalHeader + ((PIMAGE_NT_HEADERS)uiHeaderValue)->FileHeader.SizeOfOptionalHeader);
 
-	// itterate through all sections, loading them into memory.
+	// iterate through all sections, loading them into memory.
 	uiValueE = ((PIMAGE_NT_HEADERS)uiHeaderValue)->FileHeader.NumberOfSections;
 	while (uiValueE--)
 	{
@@ -295,6 +341,7 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 
 		// copy the section over
 		uiValueD = ((PIMAGE_SECTION_HEADER)uiValueA)->SizeOfRawData;
+
 
 		while (uiValueD--)
 			*(BYTE*)uiValueB++ = *(BYTE*)uiValueC++;
@@ -308,15 +355,21 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 	// uiValueB = the address of the import directory
 	uiValueB = (ULONG_PTR) & ((PIMAGE_NT_HEADERS)uiHeaderValue)->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
 
-	// we assume their is an import table to process
+	// we assume there is an import table to process
 	// uiValueC is the first entry in the import table
 	uiValueC = (uiBaseAddress + ((PIMAGE_DATA_DIRECTORY)uiValueB)->VirtualAddress);
 
-	// itterate through all imports
-	while (((PIMAGE_IMPORT_DESCRIPTOR)uiValueC)->Name)
+	// iterate through all imports until a null RVA is found (Characteristics is mis-named)
+	while (((PIMAGE_IMPORT_DESCRIPTOR)uiValueC)->Characteristics)
 	{
 		// use LoadLibraryA to load the imported module into memory
 		uiLibraryAddress = (ULONG_PTR)pLoadLibraryA((LPCSTR)(uiBaseAddress + ((PIMAGE_IMPORT_DESCRIPTOR)uiValueC)->Name));
+
+		if (!uiLibraryAddress)
+		{
+			uiValueC += sizeof(IMAGE_IMPORT_DESCRIPTOR);
+			continue;
+		}
 
 		// uiValueD = VA of the OriginalFirstThunk
 		uiValueD = (uiBaseAddress + ((PIMAGE_IMPORT_DESCRIPTOR)uiValueC)->OriginalFirstThunk);
@@ -377,11 +430,13 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 	// check if their are any relocations present
 	if (((PIMAGE_DATA_DIRECTORY)uiValueB)->Size)
 	{
+		uiValueE = ((PIMAGE_BASE_RELOCATION)uiValueB)->SizeOfBlock;
+
 		// uiValueC is now the first entry (IMAGE_BASE_RELOCATION)
 		uiValueC = (uiBaseAddress + ((PIMAGE_DATA_DIRECTORY)uiValueB)->VirtualAddress);
 
 		// and we itterate through all entries...
-		while (((PIMAGE_BASE_RELOCATION)uiValueC)->SizeOfBlock)
+		while (uiValueE && ((PIMAGE_BASE_RELOCATION)uiValueC)->SizeOfBlock)
 		{
 			// uiValueA = the VA for this relocation block
 			uiValueA = (uiBaseAddress + ((PIMAGE_BASE_RELOCATION)uiValueC)->VirtualAddress);
@@ -444,10 +499,57 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 				uiValueD += sizeof(IMAGE_RELOC);
 			}
 
+			uiValueE -= ((PIMAGE_BASE_RELOCATION)uiValueC)->SizeOfBlock;
 			// get the next entry in the relocation directory
 			uiValueC = uiValueC + ((PIMAGE_BASE_RELOCATION)uiValueC)->SizeOfBlock;
 		}
 	}
+
+	// iterate through all sections, applying protections
+	uiValueA = ((ULONG_PTR) & ((PIMAGE_NT_HEADERS)uiHeaderValue)->OptionalHeader + ((PIMAGE_NT_HEADERS)uiHeaderValue)->FileHeader.SizeOfOptionalHeader);
+
+	uiValueE = ((PIMAGE_NT_HEADERS)uiHeaderValue)->FileHeader.NumberOfSections;
+
+	// Characteristics processing courtesy of Dark Vort∑x, 2021-06-01
+	// see: https://bruteratel.com/research/feature-update/2021/06/01/PE-Reflection-Long-Live-The-King/
+	while (uiValueE--)
+	{
+		// uiValueB is the VA for this section
+		uiValueB = (uiBaseAddress + ((PIMAGE_SECTION_HEADER)uiValueA)->VirtualAddress);
+
+		// get the sections memory protections value
+		dwProtect = 0;
+		if (((PIMAGE_SECTION_HEADER)uiValueA)->Characteristics & IMAGE_SCN_MEM_WRITE) {
+			dwProtect = PAGE_WRITECOPY;
+		}
+		if (((PIMAGE_SECTION_HEADER)uiValueA)->Characteristics & IMAGE_SCN_MEM_READ) {
+			dwProtect = PAGE_READONLY;
+		}
+		if ((((PIMAGE_SECTION_HEADER)uiValueA)->Characteristics & IMAGE_SCN_MEM_WRITE) && (((PIMAGE_SECTION_HEADER)uiValueA)->Characteristics & IMAGE_SCN_MEM_READ)) {
+			dwProtect = PAGE_READWRITE;
+		}
+		if (((PIMAGE_SECTION_HEADER)uiValueA)->Characteristics & IMAGE_SCN_MEM_EXECUTE) {
+			dwProtect = PAGE_EXECUTE;
+		}
+		if ((((PIMAGE_SECTION_HEADER)uiValueA)->Characteristics & IMAGE_SCN_MEM_EXECUTE) && (((PIMAGE_SECTION_HEADER)uiValueA)->Characteristics & IMAGE_SCN_MEM_WRITE)) {
+			dwProtect = PAGE_EXECUTE_WRITECOPY;
+		}
+		if ((((PIMAGE_SECTION_HEADER)uiValueA)->Characteristics & IMAGE_SCN_MEM_EXECUTE) && (((PIMAGE_SECTION_HEADER)uiValueA)->Characteristics & IMAGE_SCN_MEM_READ)) {
+			dwProtect = PAGE_EXECUTE_READ;
+		}
+		if ((((PIMAGE_SECTION_HEADER)uiValueA)->Characteristics & IMAGE_SCN_MEM_EXECUTE) && (((PIMAGE_SECTION_HEADER)uiValueA)->Characteristics & IMAGE_SCN_MEM_WRITE) && (((PIMAGE_SECTION_HEADER)uiValueA)->Characteristics & IMAGE_SCN_MEM_READ)) {
+			dwProtect = PAGE_EXECUTE_READWRITE;
+		}
+
+		uiValueD = ((PIMAGE_SECTION_HEADER)uiValueA)->SizeOfRawData;
+
+		if (uiValueD)
+			pVirtualProtect((LPVOID)uiValueB, uiValueD, dwProtect, &dwProtect);
+
+		// get the VA of the next section
+		uiValueA += sizeof(IMAGE_SECTION_HEADER);
+	}
+
 
 	// STEP 6: call our images entry point
 
@@ -475,6 +577,7 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader(VOID)
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD dwReason, LPVOID lpReserved)
 {
 	BOOL bReturnValue = TRUE;
+
 	switch (dwReason)
 	{
 	case DLL_QUERY_HMODULE:

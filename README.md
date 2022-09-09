@@ -4,6 +4,9 @@ Most of the codes come from SEKTOR7 - Windows Evasion Course. This RDLL (require
 
 *The effect lasts until next reboot / service restart*
 
+## Update
+**Version 1.1 (20220909)**
+- Adopted the RDLL from rapid7 to remove RWX section and apply section Characteristics
 
 ## Usage - Cobalt Strike
 Load SysmonQuiet.cna
@@ -17,3 +20,4 @@ beacon> SysmonQuiet
 ## Credits
 * SEKTOR7 - Windows Evasion Course
 * https://github.com/stephenfewer/ReflectiveDLLInjection
+* https://github.com/rapid7/ReflectiveDLLInjection

@@ -1,5 +1,5 @@
 //===============================================================================================//
-// Copyright (c) 2012, Stephen Fewer of Harmony Security (www.harmonysecurity.com)
+// Copyright (c) 2013, Stephen Fewer of Harmony Security (www.harmonysecurity.com)
 // All rights reserved.
 // 
 // Redistribution and use in source and binary forms, with or without modification, are permitted 
@@ -28,11 +28,17 @@
 #ifndef _REFLECTIVEDLLINJECTION_REFLECTIVEDLLINJECTION_H
 #define _REFLECTIVEDLLINJECTION_REFLECTIVEDLLINJECTION_H
 //===============================================================================================//
+
+#pragma warning(disable: 4311)
+#pragma warning(disable: 4312)
+
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
 // we declare some common stuff in here...
 
+#define DLL_METASPLOIT_ATTACH	4
+#define DLL_METASPLOIT_DETACH	5
 #define DLL_QUERY_HMODULE		6
 
 #define DEREF( name )*(UINT_PTR *)(name)

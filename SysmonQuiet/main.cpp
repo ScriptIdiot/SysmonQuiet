@@ -247,8 +247,8 @@ int SysmonQuiet() {
 		"/_______  / ____/____  >__|_|  /\\____/|___|  /\\_____\\ \\_/____/|__|\\___  >__|  \n"
 		"        \\/\\/         \\/      \\/            \\/        \\__>             \\/      \n"
 		"\tCredits: SEKTOR7 - Windows Evasion Course\n"
-		"\tAuthor: RDLL version by ScriptIdiot\n"
-		"\tVersion: 1.0\n"
+		"\tAuthor: RDLL version by ScriptIdiot | James Yeung\n"
+		"\tVersion: 1.1\n"
 	);
 
 
@@ -280,12 +280,12 @@ int SysmonQuiet() {
 		if (hProc != NULL) {
 			printf("[*] Sysmon is being suffocated...\n");
 			GagSysmon(hProc);
-			printf("[*] Sysmon is quiet now!\n");
+			printf("[+] Sysmon is quiet now!\n");
 			CloseHandle(hProc);
 		}
 	}
 	else
-		printf("[*] Yay! No SYSMON here!\n");
+		printf("[+] Yay! No SYSMON here!\n");
 
 	return 0;
 
